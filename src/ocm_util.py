@@ -16,6 +16,7 @@ import ocm.iter
 import ocm.oci
 import tarutil
 
+import odg.labels
 import odg.model
 import secret_mgmt
 import secret_mgmt.aws
@@ -273,6 +274,42 @@ def iter_blob_descriptors(
 
     else:
         raise RuntimeError(f'Unsupported access type: {access.type}')
+
+
+def _identity_matches(identity: dict, resource: ocm.Resource) -> bool:
+    if identity.get('name') != resource.name:
+        return False
+    if 'version' in identity and identity['version'] != resource.version:
+        return False
+    extra_keys = {k for k in identity if k not in ('name', 'version')}
+    if extra_keys != set(resource.extraIdentity):
+        return False
+    return all(resource.extraIdentity.get(k) == identity[k] for k in extra_keys)
+
+
+def iter_resources_referencing(
+    component: ocm.Component,
+    resource: ocm.Resource,
+    resource_type: str | None = None,
+) -> collections.abc.Generator[ocm.Resource, None, None]:
+    for candidate in component.resources:
+        if resource_type is not None and candidate.type != resource_type:
+            continue
+        raw_label = candidate.find_label(odg.labels.ArtifactReferencesLabel.name)
+        if not raw_label:
+            continue
+        if raw_label.version != odg.labels.ArtifactReferencesLabel.version:
+            logger.warning(
+                f'Skipping candidate {candidate.name!r}: unsupported label version '
+                f'{raw_label.version!r} (expected '
+                f'{odg.labels.ArtifactReferencesLabel.version!r})'
+            )
+            continue
+        label: odg.labels.ArtifactReferencesLabel = odg.labels.deserialise_label(raw_label)
+        for entry in label.value:
+            if _identity_matches(entry.identity, resource):
+                yield candidate
+                break
 
 
 def is_tar_archive(

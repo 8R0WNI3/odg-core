@@ -304,6 +304,38 @@ def test_deserialise_accepts_dict():
 
 
 # ---------------------------------------------------------------------------
+# ArtifactReferencesLabel
+# ---------------------------------------------------------------------------
+
+
+def test_deserialise_artifact_references_label():
+    label = ocm.Label(
+        name='ocm.software/artifact-references',
+        value=[{'identity': {'name': 'my-image', 'version': '1.0.0'}}],
+        version='v1alpha1',
+    )
+    result = odg.labels.deserialise_label(label)
+    assert isinstance(result, odg.labels.ArtifactReferencesLabel)
+    assert result.version == 'v1alpha1'
+    assert result.value[0].identity == {'name': 'my-image', 'version': '1.0.0'}
+
+
+def test_artifact_reference_entry_requires_name():
+    with pytest.raises(ValueError, match='must contain a "name" property'):
+        odg.labels.ArtifactReferenceEntry(identity={'version': '1.0.0'})
+
+
+def test_deserialise_artifact_references_label_without_name_raises():
+    label = ocm.Label(
+        name='ocm.software/artifact-references',
+        value=[{'identity': {'version': '1.0.0'}}],
+        version='v1alpha1',
+    )
+    with pytest.raises(ValueError, match='must contain a "name" property'):
+        odg.labels.deserialise_label(label)
+
+
+# ---------------------------------------------------------------------------
 # find_source_scan_policy
 # ---------------------------------------------------------------------------
 
