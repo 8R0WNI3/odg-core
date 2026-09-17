@@ -25,7 +25,6 @@ import odg.extensions_cfg
 import odg.findings
 import odg.model
 import rescore.utility
-import secret_mgmt.oauth_cfg
 import sprints.model as sm
 import sprints.util as su
 import util
@@ -753,25 +752,36 @@ class Rescore(aiohttp.web.View):
 
         user = await db_session.get(dm.User, user_id)
 
-        # XXX don't just use first entry here once mulitple IDPs (per user) are possible
-        github_user_identifier = (
+        # XXX don't just use first entry here once multiple IDPs (per user) are possible
+        user_identifier_row = (
             await db_session.execute(
                 sa.select(dm.UserIdentifiers).where(
                     dm.UserIdentifiers.user_id == user.id,
-                    dm.UserIdentifiers.type == secret_mgmt.oauth_cfg.OAuthCfgTypes.GITHUB,
                 ),
             )
         ).first()[0]
-        github_user = odg.model.GitHubUser(
-            username=github_user_identifier.deserialised_identifier.username,
-            github_hostname=github_user_identifier.deserialised_identifier.hostname,
-        )
+        user_identifier = user_identifier_row.deserialised_identifier
+
+        if isinstance(user_identifier, dm.GitHubUserIdentifier):
+            rescoring_user = odg.model.GitHubUser(
+                username=user_identifier.username,
+                github_hostname=user_identifier.hostname,
+            )
+        elif isinstance(user_identifier, dm.OidcIdentifier):
+            rescoring_user = odg.model.OidcUser(
+                username=user_identifier.sub,
+                issuer=user_identifier.issuer,
+            )
+        else:
+            raise aiohttp.web.HTTPUnauthorized(
+                text='Rescorings require a GitHub or OIDC user identity',
+            )
 
         def iter_rescorings(
             rescorings_raw: list[dict],
         ) -> collections.abc.Generator[odg.model.ArtefactMetadata, None, None]:
             for rescoring_raw in rescorings_raw:
-                rescoring_raw['data']['user'] = dataclasses.asdict(github_user)
+                rescoring_raw['data']['user'] = dataclasses.asdict(rescoring_user)
 
                 rescoring = odg.model.ArtefactMetadata.from_dict(rescoring_raw)
 

@@ -970,6 +970,16 @@ class GitHubUser(User):
     type: str = 'github-user'
 
 
+@dataclasses.dataclass(kw_only=True)
+class OidcUser(User):
+    issuer: str
+    type: str = 'oidc-user'
+
+    @property
+    def key(self) -> str:
+        return _as_key(self.username, self.type, self.issuer)
+
+
 class MetaRescoringRules(enum.StrEnum):
     BDBA_TRIAGE = 'bdba-triage'
     CUSTOM_RESCORING = 'custom-rescoring'

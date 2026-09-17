@@ -156,6 +156,18 @@ secrets:
               name: ... # <username>
             - type: github-app
               name: ... # <app-name>
+  oidc-cfg: # optional; enables OIDC token authentication (e.g. Kubernetes ServiceAccount tokens)
+    primary:
+      name: My OIDC Provider
+      issuer: https://example.com/issuer # must use HTTPS
+      audiences:
+        - delivery-service
+      role_bindings:
+        - roles:
+            - reader # reader, writer, admin
+          subjects:
+            - type: oidc-sub
+              name: ... # sub claim value or regex (e.g. system:serviceaccount:default:my-sa)
   signing-cfg:
     primary:
       id: 5e1688f9-b032-4a9b-99ee-9ff2eb3cbcb5
