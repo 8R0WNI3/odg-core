@@ -403,7 +403,7 @@ async def main():
         namespace=namespace,
     )
 
-    oci_client = lookups.semver_sanitising_oci_client_async(secret_factory)
+    oci_client = lookups.semver_sanitising_oci_client_async()
 
     if not (delivery_service_url := parsed_arguments.delivery_service_url):
         delivery_service_url = cache_manager_cfg.delivery_service_url
@@ -421,7 +421,7 @@ async def main():
 
     component_descriptor_lookup = lookups.init_component_descriptor_lookup_async(
         cache_dir=parsed_arguments.cache_dir,
-        db_url=db_url,
+        db_url_callback=lambda: db_url,
         oci_client=oci_client,
     )
 

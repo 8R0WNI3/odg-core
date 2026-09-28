@@ -31,7 +31,6 @@ import deliverydb_cache.model as dcm
 import deliverydb_cache.util as dcu
 import odg_client
 import paths
-import secret_mgmt
 import secret_mgmt.github
 import secret_mgmt.oci_registry
 import util
@@ -398,15 +397,9 @@ def extended_ocm_repository_lookup(
 
 @functools.cache
 def semver_sanitising_oci_client(
-    secret_factory: secret_mgmt.SecretFactory = None,
     http_connection_pool_size: int = 16,
 ) -> oci.client.Client:
-    if not secret_factory:
-        secret_factory = ctx_util.secret_factory()
-
-    credentials_lookup = secret_mgmt.oci_registry.oci_cfg_lookup(
-        secret_factory=secret_factory,
-    )
+    credentials_lookup = secret_mgmt.oci_registry.oci_cfg_lookup()
 
     routes = oci.client.OciRoutes()
 
@@ -428,15 +421,9 @@ def semver_sanitising_oci_client(
 
 @functools.cache
 def semver_sanitising_oci_client_async(
-    secret_factory: secret_mgmt.SecretFactory = None,
     http_connection_pool_size: int | None = None,
 ) -> oci.client_async.Client:
-    if not secret_factory:
-        secret_factory = ctx_util.secret_factory()
-
-    credentials_lookup = secret_mgmt.oci_registry.oci_cfg_lookup(
-        secret_factory=secret_factory,
-    )
+    credentials_lookup = secret_mgmt.oci_registry.oci_cfg_lookup()
 
     routes = oci.client.OciRoutes()
 
@@ -461,7 +448,7 @@ def semver_sanitising_oci_client_async(
 
 
 def db_cache_component_descriptor_lookup_async(
-    db_url: str,
+    db_url_callback: collections.abc.Callable[[], str | None],
     ocm_repository_lookup: cnudie.retrieve.OcmRepositoryLookup = None,
     encoding_format: dcm.EncodingFormat = dcm.EncodingFormat.PICKLE,
     ttl_seconds: int = 0,
@@ -502,6 +489,9 @@ def db_cache_component_descriptor_lookup_async(
         component_descriptor: ocm.ComponentDescriptor,
         start: datetime.datetime,
     ):
+        if not (db_url := db_url_callback()):
+            return None
+
         descriptor = dcm.CachedComponentDescriptor(
             encoding_format=encoding_format,
             component_name=component_id.name,
@@ -544,6 +534,9 @@ def db_cache_component_descriptor_lookup_async(
         component_id: cnudie.util.ComponentId,
         ocm_repository_lookup: cnudie.retrieve.OcmRepositoryLookup = ocm_repository_lookup,
     ):
+        if not (db_url := db_url_callback()):
+            return None
+
         component_id = cnudie.util.to_component_id(component_id)
 
         ocm_repos = cnudie.retrieve.iter_ocm_repositories(
@@ -650,7 +643,7 @@ def init_component_descriptor_lookup(
 def init_component_descriptor_lookup_async(
     ocm_repository_lookup: cnudie.retrieve.OcmRepositoryLookup = None,
     cache_dir: str = None,
-    db_url: str = None,
+    db_url_callback: collections.abc.Callable[[], str | None] = None,
     delivery_service_client: odg_client.DeliveryServiceClient = None,
     oci_client: oci.client_async.Client = None,
     default_absent_ok: bool = False,
@@ -683,10 +676,10 @@ def init_component_descriptor_lookup_async(
             ),
         )
 
-    if db_url:
+    if db_url_callback:
         lookups.append(
             db_cache_component_descriptor_lookup_async(
-                db_url=db_url,
+                db_url_callback=db_url_callback,
                 ocm_repository_lookup=ocm_repository_lookup,
             ),
         )
@@ -713,15 +706,11 @@ def init_component_descriptor_lookup_async(
     )
 
 
-def github_api_lookup(
-    secret_factory: secret_mgmt.SecretFactory = None,
-) -> collections.abc.Callable[[str], github3.github.GitHub | None]:
+def github_api_lookup() -> collections.abc.Callable[[str], github3.github.GitHub | None]:
     """
     creates a github-api-lookup. ideally, this lookup should be created at application launch, and
     passed to consumers.
     """
-    if not secret_factory:
-        secret_factory = ctx_util.secret_factory()
 
     def github_api_lookup(
         repo_url: str,
@@ -735,6 +724,8 @@ def github_api_lookup(
         raises ValueError if no configuration (credentials) is found for the given repository url
         unless absent_ok is set to a truthy value, in which case None is returned instead.
         """
+        secret_factory = ctx_util.secret_factory()
+
         return secret_mgmt.github.github_api(
             secret_factory=secret_factory,
             repo_url=repo_url,

@@ -10,23 +10,18 @@ import watchdog.events
 import watchdog.observers.polling
 
 import aiohttp.web
+import cachetools
 import dacite
 import github3.repos
 import yaml
 
-import consts
 import ctx_util
 import k8s.util
 import lookups
 import middleware.auth
-import middleware.db_session
 import odg.extensions_cfg
 import odg.findings
 import paths
-import secret_mgmt
-import secret_mgmt.delivery_db
-import secret_mgmt.oauth_cfg
-import secret_mgmt.signing_cfg
 import sprints.model as sm
 import util
 import yp
@@ -200,6 +195,7 @@ class FeatureAddressbook(FeatureBase):
 
         return yaml.safe_load(content)
 
+    @cachetools.cached(cachetools.TTLCache(maxsize=64, ttl=60 * 60 * 12))
     def get_addressbook_entries(self) -> list[yp.AddressbookEntry]:
         entries_raw = self._get_content(
             relpath=self.addressbook_relpath,
@@ -214,26 +210,13 @@ class FeatureAddressbook(FeatureBase):
             if entry_raw.get('github')
         ]
 
+    @cachetools.cached(cachetools.TTLCache(maxsize=64, ttl=60 * 60 * 12))
     def get_github_mappings(self) -> list[dict]:
         github_mappings = self._get_content(
             relpath=self.github_mappings_relpath,
         )['github_instances']
 
         return github_mappings
-
-    def serialize(self, profile: Profile | None = None) -> dict[str, any]:
-        return {
-            'state': self.state,
-            'name': self.name,
-        }
-
-
-@dataclasses.dataclass(frozen=True)
-class FeatureAuthentication(FeatureBase):
-    name: str = 'authentication'
-    signing_cfgs: list[secret_mgmt.signing_cfg.SigningCfg] = dataclasses.field(default_factory=list)
-    oauth_cfgs: list[secret_mgmt.oauth_cfg.OAuthCfg] = dataclasses.field(default_factory=list)
-    oidc_cfgs: list[secret_mgmt.oauth_cfg.OidcCfg] = dataclasses.field(default_factory=list)
 
     def serialize(self, profile: Profile | None = None) -> dict[str, any]:
         return {
@@ -265,16 +248,6 @@ class FeatureClusterAccess(FeatureBase):
 @dataclasses.dataclass(frozen=True)
 class FeatureDeliveryDB(FeatureBase):
     name: str = 'delivery-db'
-    db_url: str = None
-
-    def get_db_url(self) -> str | None:
-        return self.db_url
-
-    def serialize(self, profile: Profile | None = None) -> dict[str, any]:
-        return {
-            'state': self.state,
-            'name': self.name,
-        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -578,7 +551,7 @@ class FeatureSprints(FeatureBase):
     name: str = 'sprints'
     sprints_relpath: str | None = None
     github_repo: github3.repos.Repository | None = None
-    sprints_cfg: SprintsConfiguration | None = None
+    sprints_cfg: SprintsConfiguration | None = dataclasses.field(default=None, hash=False)
 
     def _get_content(self, relpath: str) -> dict:
         if self.github_repo:
@@ -616,6 +589,7 @@ class FeatureSprints(FeatureBase):
             relpath=self.sprints_relpath,
         )['sprints']
 
+    @cachetools.cached(cachetools.TTLCache(maxsize=64, ttl=60 * 60 * 12))
     def get_sprints_configuration(self) -> sm.SprintsConfiguration:
         return sm.SprintsConfiguration(
             meta=self._get_sprints_metadata(),
@@ -785,37 +759,6 @@ def deserialise_tests(tests_raw: dict) -> FeatureTests:
     )
 
 
-def deserialise_authentication(
-    secret_factory: secret_mgmt.SecretFactory,
-) -> FeatureAuthentication:
-    try:
-        signing_cfgs = secret_factory.signing_cfg()
-    except secret_mgmt.SecretTypeNotFound as e:
-        logger.warning(f'Authentication config not found: {e}')
-        return FeatureAuthentication(FeatureStates.UNAVAILABLE)
-
-    try:
-        oauth_cfgs = secret_factory.oauth_cfg()
-    except secret_mgmt.SecretTypeNotFound:
-        oauth_cfgs = []
-
-    try:
-        oidc_cfgs = secret_factory.oidc_cfg()
-    except secret_mgmt.SecretTypeNotFound:
-        oidc_cfgs = []
-
-    if not oauth_cfgs and not oidc_cfgs:
-        logger.warning('Authentication config not found: no oauth-cfg or oidc-cfg secrets present')
-        return FeatureAuthentication(FeatureStates.UNAVAILABLE)
-
-    return FeatureAuthentication(
-        state=FeatureStates.AVAILABLE,
-        signing_cfgs=signing_cfgs,
-        oauth_cfgs=oauth_cfgs,
-        oidc_cfgs=oidc_cfgs,
-    )
-
-
 def deserialise_cfg(raw: dict) -> collections.abc.Generator[FeatureBase, None, None]:
     yield deserialise_addressbook(raw.get('addressbook') or {})
 
@@ -905,48 +848,58 @@ def apply_raw_cfg():
     feature_cfgs = [f for f in feature_cfgs if not isinstance(f, FeatureLicenses)]
     feature_cfgs.append(licenses_feature)
 
+    for path in (
+        paths.features_cfg_path(),
+        paths.extensions_cfg_path(absent_ok=True),
+        paths.findings_cfg_path(absent_ok=True),
+        paths.ocm_repo_mappings_path(absent_ok=True),
+        paths.profiles_path(absent_ok=True),
+        paths.sprints_path(absent_ok=True),
+        paths.addressbook_path(absent_ok=True),
+        paths.github_mappings_path(absent_ok=True),
+    ):
+        try:
+            watch_for_file_changes(path)
+        except Exception as e:
+            logger.debug(f'failed to instantiate file watcher for {path=}: {e}')
+            pass  # is expected if file does not exist
+
 
 class CfgFileChangeEventHandler(watchdog.events.FileSystemEventHandler):
     def dispatch(self, event):
-        apply_raw_cfg()
+        logger.info(f'Detected configuration file change: {event.src_path}')
+        try:
+            apply_raw_cfg()
+        except Exception as e:
+            logger.error(f'failed to reload configuration: {e}')
+        FeatureAddressbook.get_addressbook_entries.cache_clear()
+        FeatureAddressbook.get_github_mappings.cache_clear()
+        FeatureSprints.get_sprints_configuration.cache_clear()
+        lookups.parse_ocm_repository_cfgs.cache_clear()
 
 
+@functools.cache
 def watch_for_file_changes(
-    event_handler: CfgFileChangeEventHandler,
     path: str,
+    event_handler: CfgFileChangeEventHandler | None = None,
 ):
-    try:
-        observer = watchdog.observers.polling.PollingObserver(timeout=60)
-        observer.schedule(event_handler, path)
-        observer.start()
-    except FileNotFoundError:
-        logger.warning('Feature config not found')
+    if not event_handler:
+        event_handler = CfgFileChangeEventHandler()
+
+    observer = watchdog.observers.polling.PollingObserver(timeout=60)
+    observer.schedule(event_handler, path)
+    observer.start()
 
 
-async def init_features(
-    parsed_arguments,
-    secret_factory: secret_mgmt.SecretFactory,
-    middlewares: collections.abc.Iterable,
-) -> list:
+async def init_features(parsed_arguments):
+    """
+    Initialises the features (statically) which are only based on environment variables and/or CLI
+    arguments (as those are expected to not change) as well as the remaining features with a file
+    change event handler.
+    """
     global feature_cfgs
     feature_cfgs = []
 
-    feature_authentication = deserialise_authentication(
-        secret_factory=secret_factory,
-    )
-    if (
-        feature_authentication.state is FeatureStates.AVAILABLE
-        and not parsed_arguments.shortcut_auth
-    ):
-        middlewares.append(
-            middleware.auth.auth_middleware(
-                signing_cfgs=feature_authentication.signing_cfgs,
-                default_auth=middleware.auth.AuthType.BEARER,
-            ),
-        )
-    feature_cfgs.append(feature_authentication)
-
-    cluster_access_feature = FeatureClusterAccess(FeatureStates.UNAVAILABLE)
     if not (k8s_cfg_name := parsed_arguments.k8s_cfg_name):
         k8s_cfg_name = os.environ.get('K8S_CFG_NAME')
 
@@ -961,6 +914,7 @@ async def init_features(
             kubeconfig_path=parsed_arguments.kubeconfig,
         )
     else:
+        cluster_access_feature = FeatureClusterAccess(FeatureStates.UNAVAILABLE)
         logger.warning(
             'required cfgs for cluster access feature missing, will be disabled; '
             f'{k8s_cfg_name=}, {k8s_namespace=}',
@@ -968,56 +922,16 @@ async def init_features(
 
     feature_cfgs.append(cluster_access_feature)
 
-    delivery_db_feature_state = FeatureStates.UNAVAILABLE
-    if db_url := parsed_arguments.delivery_db_url:
+    if parsed_arguments.delivery_db_url or cluster_access_feature.state is FeatureStates.AVAILABLE:
+        # feature is available if either url is specified directly or can be built from k8s context
         delivery_db_feature_state = FeatureStates.AVAILABLE
     else:
-        if cluster_access_feature.state is FeatureStates.AVAILABLE:
-            try:
-                delivery_db_cfgs = secret_factory.delivery_db()
-                if len(delivery_db_cfgs) != 1:
-                    raise ValueError(
-                        f'There must be exactly one delivery-db secret, found {len(delivery_db_cfgs)}',  # noqa: E501
-                    )
+        logger.warning('required cluster-access for delivery-db feature missing, will be disabled')
+        delivery_db_feature_state = FeatureStates.UNAVAILABLE
 
-                delivery_db_cfg: secret_mgmt.delivery_db.DeliveryDB = delivery_db_cfgs[0]
-                db_url = delivery_db_cfg.connection_url(
-                    namespace=cluster_access_feature.get_namespace(),
-                )
-                delivery_db_feature_state = FeatureStates.AVAILABLE
-            except secret_mgmt.SecretTypeNotFound:
-                logger.warning('Delivery database config not found')
-
-        else:
-            logger.warning(
-                'required cluster-access for delivery-db feature missing, will be disabled',
-            )
-
-    if delivery_db_feature_state is FeatureStates.AVAILABLE:
-        middlewares.append(
-            await middleware.db_session.db_session_middleware(
-                db_url=db_url,
-                verify_db_session=False,
-            ),
-        )
-
-    feature_cfgs.append(FeatureDeliveryDB(delivery_db_feature_state, db_url=db_url))
-
-    event_handler = CfgFileChangeEventHandler()
-    watch_for_file_changes(event_handler, paths.features_cfg_path())
-
-    if extensions_cfg_path := paths.extensions_cfg_path(absent_ok=True):
-        watch_for_file_changes(event_handler, extensions_cfg_path)
-    if findings_cfg_path := paths.findings_cfg_path(absent_ok=True):
-        watch_for_file_changes(event_handler, findings_cfg_path)
-    if ocm_repo_mappings_path := paths.ocm_repo_mappings_path(absent_ok=True):
-        watch_for_file_changes(event_handler, ocm_repo_mappings_path)
-    if profiles_path := paths.profiles_path(absent_ok=True):
-        watch_for_file_changes(event_handler, profiles_path)
+    feature_cfgs.append(FeatureDeliveryDB(delivery_db_feature_state))
 
     apply_raw_cfg()
-
-    return middlewares
 
 
 class Features(aiohttp.web.View):
@@ -1061,8 +975,7 @@ class Features(aiohttp.web.View):
         """
         params = self.request.rel_url.query
 
-        profiles_callback = self.request.app[consts.APP_PROFILES_CALLBACK]
-        profile = profiles_callback(util.param(params, 'profile'))
+        profile = get_feature(FeatureProfiles).find_profile(util.param(params, 'profile'))
 
         self.feature_cfgs = list(f.serialize(profile) for f in feature_cfgs)
 

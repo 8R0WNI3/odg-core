@@ -16,7 +16,6 @@ import blobstore.blob
 import compliance_tests
 import components
 import consts
-import ctx_util
 import deliverydb.cache_async
 import dora
 import eol
@@ -26,13 +25,13 @@ import lookups
 import metadata
 import middleware.auth
 import middleware.cors
+import middleware.db_session
 import middleware.errors
 import middleware.prometheus
 import middleware.route_feature_check as rfc
 import osinfo
 import paths
 import rescore.artefacts
-import secret_mgmt
 import service_extensions
 import special_component
 import sprints
@@ -94,91 +93,47 @@ def get_base_url(
 
 def add_app_context_vars(
     app: aiohttp.web.Application,
-    secret_factory: secret_mgmt.SecretFactory,
     parsed_arguments,
 ) -> aiohttp.web.Application:
-    oci_client = lookups.semver_sanitising_oci_client_async(secret_factory)
+    oci_client = lookups.semver_sanitising_oci_client_async()
 
-    delivery_db_feature = features.get_feature(features.FeatureDeliveryDB)
-    if delivery_db_feature.state is features.FeatureStates.AVAILABLE:
-        delivery_db_feature: features.FeatureDeliveryDB
-        db_url = delivery_db_feature.db_url
-    else:
-        db_url = None
+    def db_url_callback() -> str | None:
+        return parsed_arguments.delivery_db_url or middleware.db_session.incluster_db_url()
 
     component_descriptor_lookup = lookups.init_component_descriptor_lookup_async(
         cache_dir=parsed_arguments.cache_dir,
-        db_url=db_url,
+        db_url_callback=db_url_callback,
         oci_client=oci_client,
     )
 
-    github_api_lookup = lookups.github_api_lookup(secret_factory)
+    github_api_lookup = lookups.github_api_lookup()
     github_repo_lookup = lookups.github_repo_lookup(github_api_lookup)
-
-    addressbook_feature = features.get_feature(features.FeatureAddressbook)
-    if addressbook_feature.state is features.FeatureStates.AVAILABLE:
-        addressbook_feature: features.FeatureAddressbook
-
-        addressbook_entries = addressbook_feature.get_addressbook_entries()
-        addressbook_github_mappings = addressbook_feature.get_github_mappings()
-        addressbook_source = addressbook_feature.get_source()
-    else:
-        addressbook_entries = []
-        addressbook_github_mappings = []
-        addressbook_source = None
-
-    component_with_tests_callback = features.get_feature(
-        features.FeatureTests,
-    ).get_component_with_tests
-
-    extensions_cfg = features.get_feature(features.FeatureExtensionsConfiguration).extensions_cfg
-    finding_cfgs = features.get_feature(features.FeatureFindingConfigurations).finding_cfgs
 
     cluster_access_feature = features.get_feature(features.FeatureClusterAccess)
     if cluster_access_feature.state is features.FeatureStates.AVAILABLE:
-        kubernetes_api_callback = cluster_access_feature.get_kubernetes_api
+        cluster_access_feature: features.FeatureClusterAccess
+
+        kubernetes_api = cluster_access_feature.get_kubernetes_api()
+        namespace = cluster_access_feature.get_namespace()
     else:
-        kubernetes_api_callback = None
-
-    namespace_callback = cluster_access_feature.get_namespace
-
-    profiles_callback = features.get_feature(features.FeatureProfiles).find_profile
-
-    special_component_callback = features.get_feature(
-        features.FeatureSpecialComponents,
-    ).find_special_component
-
-    sprints_feature = features.get_feature(features.FeatureSprints)
-    if sprints_feature.state is features.FeatureStates.AVAILABLE:
-        sprints_configuration = sprints_feature.get_sprints_configuration()
-    else:
-        sprints_configuration = None
+        kubernetes_api = None
+        namespace = None
 
     base_url = get_base_url(
         is_productive=parsed_arguments.productive,
-        kubernetes_api=kubernetes_api_callback() if kubernetes_api_callback else None,
-        namespace=namespace_callback(),
+        kubernetes_api=kubernetes_api,
+        namespace=namespace,
         port=parsed_arguments.port,
     )
 
-    app[consts.APP_ADDRESSBOOK_ENTRIES] = addressbook_entries
-    app[consts.APP_ADDRESSBOOK_GITHUB_MAPPINGS] = addressbook_github_mappings
-    app[consts.APP_ADDRESSBOOK_SOURCE] = addressbook_source
     app[consts.APP_BASE_URL] = base_url
     app[consts.APP_COMPONENT_DESCRIPTOR_LOOKUP] = component_descriptor_lookup
-    app[consts.APP_COMPONENT_WITH_TESTS_CALLBACK] = component_with_tests_callback
     app[consts.APP_EOL_CLIENT] = eol.EolClient()
-    app[consts.APP_EXTENSIONS_CFG] = extensions_cfg
-    app[consts.APP_FINDING_CFGS] = finding_cfgs
     app[consts.APP_GITHUB_API_LOOKUP] = github_api_lookup
     app[consts.APP_GITHUB_REPO_LOOKUP] = github_repo_lookup
-    app[consts.APP_KUBERNETES_API_CALLBACK] = kubernetes_api_callback
-    app[consts.APP_NAMESPACE_CALLBACK] = namespace_callback
+    app[consts.APP_KUBERNETES_API] = kubernetes_api
+    app[consts.APP_NAMESPACE] = namespace
     app[consts.APP_OCI_CLIENT] = oci_client
-    app[consts.APP_PROFILES_CALLBACK] = profiles_callback
-    app[consts.APP_SECRET_FACTORY] = secret_factory
-    app[consts.APP_SPECIAL_COMPONENT_CALLBACK] = special_component_callback
-    app[consts.APP_SPRINTS_CONFIGURATION] = sprints_configuration
 
     return app
 
@@ -386,18 +341,20 @@ async def initialise_app():
     loop = asyncio.get_running_loop()
     loop.set_default_executor(executor)
 
-    secret_factory = ctx_util.secret_factory()
+    if parsed_arguments.shortcut_auth:
+        default_auth = middleware.auth.AuthType.NONE
+    else:
+        default_auth = middleware.auth.AuthType.BEARER
 
-    middlewares = [
+    middlewares = (
         middleware.cors.cors_middleware(),
         middleware.errors.errors_middleware(),
-    ]
-
-    middlewares = await features.init_features(
-        parsed_arguments=parsed_arguments,
-        secret_factory=secret_factory,
-        middlewares=middlewares,
+        middleware.auth.auth_middleware(default_auth=default_auth),
+        middleware.db_session.db_session_middleware(db_url=parsed_arguments.delivery_db_url),
+        rfc.feature_check_middleware(),
     )
+
+    await features.init_features(parsed_arguments)
 
     if available_features := tuple(
         f for f in features.feature_cfgs if f.state is features.FeatureStates.AVAILABLE
@@ -414,7 +371,6 @@ async def initialise_app():
             f'The following feature{"s are" if len(unavailable_features) != 1 else " is"} '
             f'inactive: {", ".join(sorted(f.name for f in unavailable_features))}',
         )
-        middlewares.append(rfc.feature_check_middleware(unavailable_features))
 
     app = aiohttp.web.Application(
         middlewares=middlewares,
@@ -434,7 +390,6 @@ async def initialise_app():
 
     app = add_app_context_vars(
         app=app,
-        secret_factory=secret_factory,
         parsed_arguments=parsed_arguments,
     )
 
