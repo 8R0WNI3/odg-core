@@ -154,16 +154,6 @@ async def _find_rescorings(
                 == artefact.artefact.normalised_artefact_extra_id,
                 dm.ArtefactMetaData.artefact_extra_id_normalised == stripped_artefact_extra_id,
             ),
-            sa.or_(
-                dm.ArtefactMetaData.artefact_kind == sa.null(),
-                dm.ArtefactMetaData.artefact_kind == '',
-                dm.ArtefactMetaData.artefact_kind == artefact.artefact_kind,
-            ),
-            sa.or_(
-                dm.ArtefactMetaData.artefact_type == sa.null(),
-                dm.ArtefactMetaData.artefact_type == '',
-                dm.ArtefactMetaData.artefact_type == artefact.artefact.artefact_type,
-            ),
         ),
     )
 
@@ -218,16 +208,6 @@ async def _find_scanner_writebacks(
                 dm.ArtefactMetaData.artefact_extra_id_normalised
                 == artefact.artefact.normalised_artefact_extra_id,
                 dm.ArtefactMetaData.artefact_extra_id_normalised == stripped_artefact_extra_id,
-            ),
-            sa.or_(
-                dm.ArtefactMetaData.artefact_kind == sa.null(),
-                dm.ArtefactMetaData.artefact_kind == '',
-                dm.ArtefactMetaData.artefact_kind == artefact.artefact_kind,
-            ),
-            sa.or_(
-                dm.ArtefactMetaData.artefact_type == sa.null(),
-                dm.ArtefactMetaData.artefact_type == '',
-                dm.ArtefactMetaData.artefact_type == artefact.artefact.artefact_type,
             ),
         ),
     )

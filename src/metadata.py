@@ -1013,15 +1013,6 @@ class ArtefactMetadataQuery(aiohttp.web.View):
             ):
                 yield query
 
-            if artefact_ref.artefact_kind:
-                yield sa.or_(
-                    sa.and_(
-                        none_ok,
-                        dm.ArtefactMetaData.artefact_kind.is_(None),
-                    ),
-                    dm.ArtefactMetaData.artefact_kind == artefact_ref.artefact_kind,
-                )
-
             if not artefact_ref.artefact:
                 return
 
@@ -1041,15 +1032,6 @@ class ArtefactMetadataQuery(aiohttp.web.View):
                         dm.ArtefactMetaData.artefact_version.is_(None),
                     ),
                     dm.ArtefactMetaData.artefact_version == artefact_version,
-                )
-
-            if artefact_type := artefact_ref.artefact.artefact_type:
-                yield sa.or_(
-                    sa.and_(
-                        none_ok,
-                        dm.ArtefactMetaData.artefact_type.is_(None),
-                    ),
-                    dm.ArtefactMetaData.artefact_type == artefact_type,
                 )
 
             if artefact_extra_id := artefact_ref.artefact.normalised_artefact_extra_id:
@@ -1237,9 +1219,15 @@ class ArtefactMetadata(aiohttp.web.View):
             if (
                 existing_entry.type != new_entry.type
                 or existing_entry.component_name != new_entry.component_name
-                or existing_entry.artefact_kind != new_entry.artefact_kind
                 or existing_entry.artefact_name != new_entry.artefact_name
-                or existing_entry.artefact_type != new_entry.artefact_type
+                or odg.model.normalise_artefact_extra_id(
+                    artefact_extra_id=existing_entry.artefact_extra_id,
+                    omit_version=True,
+                )
+                != odg.model.normalise_artefact_extra_id(
+                    artefact_extra_id=new_entry.artefact_extra_id,
+                    omit_version=True,
+                )
             ):
                 return None, None
 
