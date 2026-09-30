@@ -39,7 +39,9 @@
       dependencyDashboardApproval: true,
     },
     {
-      matchUpdateTypes: ['patch'],
+      // Also covers digest bumps from republished tags and the initial
+      // pinning itself (docker:pinDigests) — both are noise-free.
+      matchUpdateTypes: ['patch', 'digest', 'pinDigest'],
       automerge: true,
     },
     {
