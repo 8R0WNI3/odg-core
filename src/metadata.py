@@ -16,6 +16,7 @@ import deliverydb.model as dm
 import deliverydb.search_model as sm
 import deliverydb.util as du
 import deliverydb_cache.model as dcm
+import deliverydb_cache.util as dcu
 import features
 import lookups
 import middleware.cors
@@ -1236,6 +1237,7 @@ class ArtefactMetadata(aiohttp.web.View):
         }
 
         created_artefacts: list[dm.ArtefactMetaData] = []
+        cache_ids_to_invalidate: set[str] = set()
 
         finding_cfgs = features.get_feature(features.FeatureFindingConfigurations).finding_cfgs
 
@@ -1322,9 +1324,9 @@ class ArtefactMetadata(aiohttp.web.View):
                         if found:
                             break
 
-                await _mark_compliance_summary_cache_for_deletion(
-                    db_session=db_session,
+                _collect_compliance_summary_cache_ids(
                     artefact_metadata=metadata_entry,
+                    cache_ids=cache_ids_to_invalidate,
                 )
 
                 if not found:
@@ -1351,6 +1353,13 @@ class ArtefactMetadata(aiohttp.web.View):
                     last_update=metadata_entry.meta['last_update'],
                     responsibles=metadata_entry.meta.get('responsibles'),
                     assignee_mode=metadata_entry.meta.get('assignee_mode'),
+                )
+
+            if cache_ids_to_invalidate:
+                await db_session.execute(
+                    sa.update(dm.DBCache)
+                    .where(dm.DBCache.id.in_(cache_ids_to_invalidate))
+                    .values(delete_after=datetime.datetime.now(datetime.UTC)),
                 )
 
             await db_session.commit()
@@ -1531,3 +1540,52 @@ async def _mark_compliance_summary_cache_for_deletion(
             finding_type=finding_type,
             datasource=artefact_metadata.datasource,
         )
+
+
+def _collect_compliance_summary_cache_ids(
+    artefact_metadata: dm.ArtefactMetaData,
+    cache_ids: set[str],
+):
+    if not (
+        artefact_metadata.component_name
+        and artefact_metadata.component_version
+        and artefact_metadata.type
+        and artefact_metadata.datasource
+    ):
+        # If one of these properties is not set, the cache id cannot be calculated properly.
+        # Currently, this is only the case for BDBA findings where the component version is left
+        # empty. In that case, the cache is invalidated upon successful finish of the scan.
+        return
+
+    component = ocm.ComponentIdentity(
+        name=artefact_metadata.component_name,
+        version=artefact_metadata.component_version,
+    )
+
+    if artefact_metadata.type == odg.model.Datatype.ARTEFACT_SCAN_INFO:
+        # If the artefact scan info changes, the compliance summary for all datatypes related to
+        # this datasource has to be updated, because it may has changed from
+        # UNKNOWN -> CLEAN/FINDINGS
+        datatypes = odg.model.Datasource(artefact_metadata.datasource).datatypes()
+    else:
+        datatypes = (artefact_metadata.type,)
+
+    for datatype in datatypes:
+        try:
+            finding_type = odg.model.Datatype(datatype)
+        except ValueError:
+            continue
+
+        descriptor = dcm.CachedPythonFunction(
+            encoding_format=dcm.EncodingFormat.PICKLE,
+            function_name='compliance_summary.component_datatype_summaries',
+            args=dcu.normalise_and_serialise_object(()),
+            kwargs=dcu.normalise_and_serialise_object(
+                {
+                    'component': component,
+                    'finding_type': finding_type,
+                    'datasource': artefact_metadata.datasource,
+                },
+            ),
+        )
+        cache_ids.add(descriptor.id)

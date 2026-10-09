@@ -63,15 +63,16 @@ def db_session_middleware(
         if not _db_url:
             return await handler(request)
 
+        request[consts.REQUEST_DB_URL] = _db_url
         request[consts.REQUEST_DB_SESSION] = await deliverydb.sqlalchemy_session_async(
             db_url=_db_url,
             pool_timeout=5,
         )
         request[consts.REQUEST_DB_SESSION_LOW_PRIO] = await deliverydb.sqlalchemy_session_async(
             db_url=_db_url,
-            pool_size=2,
-            max_overflow=1,
-            pool_timeout=300,
+            pool_size=deliverydb.DB_POOL_LOW_PRIO_SIZE,
+            max_overflow=deliverydb.DB_POOL_LOW_PRIO_MAX_OVERFLOW,
+            pool_timeout=deliverydb.DB_POOL_LOW_PRIO_TIMEOUT,
         )
 
         try:
@@ -83,9 +84,15 @@ def db_session_middleware(
             raise
         finally:
             if db_session := request.get(consts.REQUEST_DB_SESSION):
-                await db_session.close()
+                try:
+                    await db_session.rollback()
+                finally:
+                    await db_session.close()
             if db_session_low_prio := request.get(consts.REQUEST_DB_SESSION_LOW_PRIO):
-                await db_session_low_prio.close()
+                try:
+                    await db_session_low_prio.rollback()
+                finally:
+                    await db_session_low_prio.close()
 
         return response
 

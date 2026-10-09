@@ -13,6 +13,11 @@ def do_raise(self):
 # prevent usage of postgresql exclusive `JSONB`
 sap.JSONB.__init__ = do_raise
 
+# pool configuration for low-priority sessions (small pool, long timeout)
+DB_POOL_LOW_PRIO_SIZE = 2
+DB_POOL_LOW_PRIO_MAX_OVERFLOW = 1
+DB_POOL_LOW_PRIO_TIMEOUT = 300
+
 sessionmakers_async: dict[
     tuple[int, int, int],
     sqlasync.async_sessionmaker[sqlasync.session.AsyncSession],
@@ -42,6 +47,10 @@ async def _sqlalchemy_sessionmaker_async(
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_timeout=pool_timeout,
+        connect_args={
+            # Kill sessions left idle-in-transaction after 30 min to prevent lock storms.
+            'options': '-c idle_in_transaction_session_timeout=1800000',
+        },
     )
 
     async with engine.begin() as conn:
@@ -92,6 +101,9 @@ def _sqlalchemy_sessionmaker(
         pool_size=pool_size,
         max_overflow=max_overflow,
         pool_timeout=pool_timeout,
+        connect_args={
+            'options': '-c idle_in_transaction_session_timeout=1800000',
+        },
     )
 
     dm.Base.metadata.create_all(engine)
