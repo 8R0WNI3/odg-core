@@ -4,6 +4,8 @@ image:
   repository: null
   tag: null
 imagePullSecrets: []
+deliveryDb:
+  secretName: secret-factory-delivery-db
 deployment:
   annotations: []
   resources:

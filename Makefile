@@ -1,4 +1,4 @@
-.PHONY: help setup lint lint-staged format format-staged test build-clients build-core build-docker build-docker-local .check-build-prereqs run-db run clean
+.PHONY: help setup lint lint-staged format format-staged test build-clients build-core build-docker build-docker-local build-helm-local .check-build-prereqs run-db run clean
 
 # Configuration variables with defaults
 DB_PASSWORD ?= MyPassword
@@ -21,6 +21,7 @@ help:
 	@echo "  build-core     - Build odg-core-libs package"
 	@echo "  build-docker   - Build Docker image"
 	@echo "  build-docker-local - Build Docker image for current architecture only"
+	@echo "  build-helm-local  - Package Helm charts into dist/ for local use"
 	@echo "  run-db         - Run a PostgreSQL database instance"
 	@echo "  run            - Run the development server"
 	@echo "  clean          - Remove build artifacts"
@@ -192,6 +193,21 @@ build-docker-local: .check-build-prereqs
 		-f Dockerfile \
 		.
 	@echo "Docker image built: odg-core:$(ODG_CORE_LIBS_VERSION)"
+
+# Package Helm charts for local use
+build-helm-local: .check-build-prereqs
+	@echo "Packaging Helm charts..."
+	@helm package charts/delivery-service \
+		--version $(ODG_CORE_LIBS_VERSION) \
+		--destination dist
+	@helm package charts/extensions \
+		--version $(ODG_CORE_LIBS_VERSION) \
+		--destination dist
+	@helm package charts/bootstrapping \
+		--version $(ODG_CORE_LIBS_VERSION) \
+		--destination dist
+	@echo "Helm charts packaged:"
+	@ls -1 dist/*.tgz
 
 # Run PostgreSQL database instance
 run-db:
