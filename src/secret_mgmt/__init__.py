@@ -91,6 +91,10 @@ def default_secret_type_to_class(secret_type: str) -> object:
             import secret_mgmt.signing_cfg
 
             return secret_mgmt.signing_cfg.SigningCfg
+        case 'http':
+            import secret_mgmt.http
+
+            return secret_mgmt.http.HTTP
         case _:
             return GenericModelElement
 
