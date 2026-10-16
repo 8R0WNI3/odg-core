@@ -1912,6 +1912,34 @@ secrets:
       # @param secrets.github-app.<name>.tls_verify
       tls_verify: true
 
+  # @param secrets.http mapping of a secret-name (freely selectable) and the credentials used to
+  # authenticate HTTP(S) requests for resources with HTTP/Wget access type
+  http:
+    primary:
+      # @param secrets.http.<name>.url_prefixes list of URL prefixes for which these credentials
+      # should be used
+      # note: The prefixes are _not_ evaluated as a regex
+      # e.g.
+      # url_prefixes:
+      #   - https://example.com/path
+      url_prefixes: []
+      # @param secrets.http.<name>.username the username for HTTP basic auth (optional)
+      username: null
+      # @param secrets.http.<name>.password the password for HTTP basic auth (optional)
+      password: null
+      # @param secrets.http.<name>.identity_token bearer token for HTTP auth (optional, takes
+      # precedence over basic auth)
+      identity_token: null
+      # @param secrets.http.<name>.certificate PEM-encoded client certificate for mTLS (optional,
+      # must be set together with private_key)
+      certificate: null
+      # @param secrets.http.<name>.private_key PEM-encoded private key for mTLS (optional,
+      # must be set together with certificate)
+      private_key: null
+      # @param secrets.http.<name>.certificate_authority PEM-encoded CA certificate to verify the
+      # server's TLS certificate (optional, defaults to system CAs)
+      certificate_authority: null
+
   # @param secrets.oci-registry mapping of a secret-name (freely selectable) and the OCI registry
   # secret-values
   oci-registry:
