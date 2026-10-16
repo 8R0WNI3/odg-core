@@ -335,6 +335,7 @@ class BDBAConfig(BacklogItemMixins):
     ) -> bool:
         supported_artefact_kinds = (odg.model.ArtefactKind.RESOURCE,)
         supported_access_types = (
+            ocm.AccessType.HTTP,
             ocm.AccessType.LOCAL_BLOB,
             ocm.AccessType.OCI_BLOB,
             ocm.AccessType.OCI_REGISTRY,
@@ -397,6 +398,7 @@ class TrivyConfig(BacklogItemMixins):
     ) -> bool:
         supported_artefact_kinds = (odg.model.ArtefactKind.RESOURCE,)
         supported_access_types = (
+            ocm.AccessType.HTTP,
             ocm.AccessType.LOCAL_BLOB,
             ocm.AccessType.OCI_BLOB,
             ocm.AccessType.OCI_REGISTRY,
@@ -516,6 +518,7 @@ class BlackDuckConfig(BacklogItemMixins):
     ) -> bool:
         supported_artefact_kinds = (odg.model.ArtefactKind.RESOURCE,)
         supported_access_types = (
+            ocm.AccessType.HTTP,
             ocm.AccessType.LOCAL_BLOB,
             ocm.AccessType.OCI_BLOB,
             ocm.AccessType.OCI_REGISTRY,
@@ -711,6 +714,7 @@ class ClamAVConfig(BacklogItemMixins):
     ) -> bool:
         supported_artefact_kinds = (odg.model.ArtefactKind.RESOURCE,)
         supported_access_types = (
+            ocm.AccessType.HTTP,
             ocm.AccessType.LOCAL_BLOB,
             ocm.AccessType.OCI_BLOB,
             ocm.AccessType.OCI_REGISTRY,
@@ -869,6 +873,7 @@ class CryptoConfig(BacklogItemMixins):
     ) -> bool:
         supported_artefact_kinds = (odg.model.ArtefactKind.RESOURCE,)
         supported_access_types = (
+            ocm.AccessType.HTTP,
             ocm.AccessType.LOCAL_BLOB,
             ocm.AccessType.OCI_BLOB,
             ocm.AccessType.OCI_REGISTRY,
@@ -1284,6 +1289,7 @@ class OsId(BacklogItemMixins):
     ) -> bool:
         supported_artefact_kinds = (odg.model.ArtefactKind.RESOURCE,)
         supported_access_types = (
+            ocm.AccessType.HTTP,
             ocm.AccessType.LOCAL_BLOB,
             ocm.AccessType.OCI_REGISTRY,
         )
@@ -1349,6 +1355,7 @@ class SBOMGeneratorConfig(BacklogItemMixins):
     ) -> bool:
         supported_artefact_kinds = (odg.model.ArtefactKind.RESOURCE,)
         supported_access_types = (
+            ocm.AccessType.HTTP,
             ocm.AccessType.LOCAL_BLOB,
             ocm.AccessType.OCI_BLOB,
             ocm.AccessType.OCI_REGISTRY,

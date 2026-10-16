@@ -1,11 +1,14 @@
+import base64
 import collections.abc
 import dataclasses
 import io
 import logging
 import os
 import tarfile
+import tempfile
 
 import dacite
+import requests
 
 import oci.client
 import oci.client_async
@@ -20,6 +23,7 @@ import odg.labels
 import odg.model
 import secret_mgmt
 import secret_mgmt.aws
+import secret_mgmt.http
 import util
 
 
@@ -33,6 +37,85 @@ class BlobDescriptor:
     digest: str | None = None
     media_type: str | None = None
     name: str | None = None
+
+
+def _iter_blob_descriptors_for_http(
+    http_access: ocm.HTTPAccess,
+    secret_factory: secret_mgmt.SecretFactory,
+    chunk_size: int = 8192,
+) -> collections.abc.Generator[BlobDescriptor, None, None]:
+    verb = (http_access.verb or 'GET').upper()
+    headers = dict(http_access.header or {})
+
+    body = None
+    if http_access.body:
+        body = base64.b64decode(http_access.body)
+
+    basic_auth = None
+    cert = None
+    verify = True
+    tls_tempfiles = []
+    if http_cfg := secret_mgmt.http.find_cfg(
+        secret_factory=secret_factory,
+        url=http_access.url,
+    ):
+        basic_auth, auth_headers = http_cfg.auth_config()
+        headers |= auth_headers
+        cert, verify, tls_tempfiles = http_cfg.tls_config()
+
+    try:
+        res = requests.request(
+            method=verb,
+            url=http_access.url,
+            headers=headers,
+            data=body,
+            auth=basic_auth,
+            cert=cert,
+            verify=verify,
+            stream=True,
+            allow_redirects=not http_access.noRedirect,
+        )
+    finally:
+        for file in tls_tempfiles:
+            os.unlink(file)
+
+    res.raise_for_status()
+
+    media_type = (
+        http_access.mediaType or res.headers.get('Content-Type') or 'application/octet-stream'
+    )
+
+    if content_length := res.headers.get('Content-Length'):
+        size = int(content_length)
+        content = res.iter_content(chunk_size=chunk_size)
+    else:
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            for chunk in res.iter_content(chunk_size=chunk_size):
+                tmp.write(chunk)
+            size = tmp.tell()
+            tmp.close()
+
+            def _read_and_delete(path):
+                try:
+                    with open(path, 'rb') as f:
+                        while chunk := f.read(chunk_size):
+                            yield chunk
+                finally:
+                    os.unlink(path)
+
+            content = _read_and_delete(tmp.name)
+        except Exception:
+            tmp.close()
+            os.unlink(tmp.name)
+            raise
+
+    yield BlobDescriptor(
+        content=content,
+        size=size,
+        media_type=media_type,
+        name=http_access.url.rstrip('/').rsplit('/', 1)[-1],
+    )
 
 
 def _iter_blob_descriptors_for_manifest(
@@ -242,7 +325,13 @@ def iter_blob_descriptors(
     secret_factory: secret_mgmt.SecretFactory,
     aws_secret_name: str | None = None,
 ) -> collections.abc.Generator[BlobDescriptor, None, None]:
-    if access.type is ocm.AccessType.OCI_REGISTRY:
+    if access.type is ocm.AccessType.HTTP:
+        return _iter_blob_descriptors_for_http(
+            http_access=access,
+            secret_factory=secret_factory,
+        )
+
+    elif access.type is ocm.AccessType.OCI_REGISTRY:
         access: ocm.OciAccess
 
         return _iter_blob_descriptors_for_manifest(
