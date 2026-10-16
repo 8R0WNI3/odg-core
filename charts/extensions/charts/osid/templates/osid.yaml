@@ -61,6 +61,8 @@ spec:
               mountPath: /secrets/github
             - name: github-app
               mountPath: /secrets/github-app
+            - name: http
+              mountPath: /secrets/http
             - name: kubernetes
               mountPath: /secrets/kubernetes
             - name: oci-registry
@@ -91,6 +93,10 @@ spec:
           secret:
             secretName: secret-factory-github-app
             optional: true
+        - name: http
+          secret:
+            secretName: secret-factory-http
+            optional: true # http credentials are optional
         - name: kubernetes
           secret:
             secretName: secret-factory-kubernetes
