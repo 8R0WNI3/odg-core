@@ -29,6 +29,9 @@ spec:
                     alertmanagerEnabled:
                       type: boolean
                       default: false
+                    persesEnabled:
+                      type: boolean
+                      default: false
                     base_url:
                       type: string
                     deliveryServiceMaxReplicas:
