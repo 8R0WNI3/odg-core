@@ -21,7 +21,8 @@ jobs:
     environment: # require approval to run
       name: release
       deployment: false
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -34,7 +35,10 @@ jobs:
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-tags: true
           persist-credentials: false
+          sparse-checkout: |
+            .ocm
       - name: Verify component references are no release candidates
         if: ${{ inputs.mode == 'regular' }}
         run: |
@@ -48,15 +52,66 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          version=$(cat VERSION)
-          if [[ "$version" =~ -rc\.([0-9]+)$ ]]; then
-            release_candidate="${BASH_REMATCH[1]}"
+          set -euo pipefail
+
+          # extract major.minor from branch name "release-<major>.<minor>"
+          major_minor="${GITHUB_REF_NAME#release-}"
+
+          # greatest full-release tag for this major.minor (pre-release tags excluded)
+          last_final=$(git tag --list "${major_minor}.*" \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V \
+            | tail -1 || true)
+
+          # greatest rc tag for this major.minor
+          last_rc_tag=$(git tag --list "${major_minor}.*" \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' \
+            | sort -V \
+            | tail -1 || true)
+
+          # determine last_patch and last_rc from the greatest of the two
+          if [[ -z "${last_final}" && -z "${last_rc_tag}" ]]; then
+            last_patch=-1
+            last_rc=-1
+          elif [[ -z "${last_rc_tag}" ]]; then
+            last_patch=$(echo "${last_final}" | cut -d. -f3)
+            last_rc=-1
+          elif [[ -z "${last_final}" ]]; then
+            last_patch=$(echo "${last_rc_tag}" | cut -d. -f3 | cut -d- -f1)
+            last_rc=$(echo "${last_rc_tag}" | grep -oE 'rc\.[0-9]+$' | cut -d. -f2)
           else
-            release_candidate=0
+            final_patch=$(echo "${last_final}" | cut -d. -f3)
+            rc_patch=$(echo "${last_rc_tag}" | cut -d. -f3 | cut -d- -f1)
+            if (( rc_patch > final_patch )); then
+              last_patch="${rc_patch}"
+              last_rc=$(echo "${last_rc_tag}" | grep -oE 'rc\.[0-9]+$' | cut -d. -f2)
+            else
+              last_patch="${final_patch}"
+              last_rc=-1
+            fi
           fi
 
-          echo "Will use release candidate 'rc.${release_candidate}'"
-          echo "release-candidate=${release_candidate}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs.mode }}" == "candidate" ]]; then
+            if [[ "${last_rc}" == -1 ]]; then
+              next_patch=$(( last_patch + 1 ))
+            else
+              next_patch="${last_patch}"
+            fi
+            next_rc=$(( last_rc + 1 ))
+            version="${major_minor}.${next_patch}-rc.${next_rc}"
+          else
+            # regular release: promote current patch (drop rc suffix) or bump patch
+            if [[ "${last_rc}" == -1 ]]; then
+              # no rc in progress: bump patch directly
+              version="${major_minor}.$(( last_patch + 1 ))"
+            else
+              # promote the rc to a full release
+              version="${major_minor}.${last_patch}"
+            fi
+          fi
+
+          echo "Determined version: ${version} (last final: ${last_final:-none}, last rc: ${last_rc_tag:-none})"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   build-and-publish-artifacts:
     name: Build and publish OCI artifacts
@@ -89,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Publish to PyPI
     needs:
-      - publish-component
+      - build-and-publish-artifacts
     permissions:
       id-token: write
     steps:
@@ -98,5 +153,33 @@ jobs:
         with:
           name: distribution-packages
           path: dist/
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1 # assumes package to be located in `dist/`
+      # - name: Publish to PyPI
+      #   uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1 # assumes package to be located in `dist/`
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs:
+      - build-and-publish-artifacts
+      - preprocess
+    permissions:
+      contents: write
+    steps:
+      - name: Create tag and release
+        env:
+          VERSION: ${{ needs.preprocess.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          prerelease_flag=""
+          if [[ "${VERSION}" == *-rc.* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
+          gh release create "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION" \
+            --generate-notes \
+            --target "$GITHUB_SHA" \
+            ${prerelease_flag}
