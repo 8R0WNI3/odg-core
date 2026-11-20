@@ -1,7 +1,5 @@
 name: ocm.software/open-delivery-gear/core
 version: "${VERSION}"
-componentReferences:
-  - version: 1.0.0
 provider:
   name: ocm.software
 resources:

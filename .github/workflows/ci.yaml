@@ -9,28 +9,71 @@ jobs:
   preprocess:
     name: Preprocess
     runs-on: ubuntu-latest
-    environment: # require approval to run
-      name: release
-      deployment: false
-    permissions: {}
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-tags: true
       - name: Determine version
         id: version
         run: |
-          version=$(cat VERSION)
-          if [[ "$version" =~ -rc\.([0-9]+)$ ]]; then
-            release_candidate="${BASH_REMATCH[1]}"
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_NAME" =~ ^release-([0-9]+\.[0-9]+)$ ]]; then
+            # release branch: use matching major.minor
+            major_minor_version="${BASH_REMATCH[1]}"
+
+            # find the highest existing tag for this minor version
+            last_tag=$(git tag --list "${major_minor_version}.*" | sort -V | tail -1)
+
+            if [[ -z "${last_tag}" ]]; then
+              # no prior tag
+              last_patch=-1
+              last_rc=-1
+            elif [[ "${last_tag}" =~ ^[0-9]+\.[0-9]+\.([0-9]+)-rc\.([0-9]+)$ ]]; then
+              last_patch="${BASH_REMATCH[1]}"
+              last_rc="${BASH_REMATCH[2]}"
+            elif [[ "${last_tag}" =~ ^[0-9]+\.[0-9]+\.([0-9]+)$ ]]; then
+              last_patch="${BASH_REMATCH[1]}"
+              last_rc=-1
+            else
+              echo "Error: could not parse last tag '${last_tag}'"
+              exit 1
+            fi
+
+            if [[ "${last_rc}" == -1 ]]; then
+              next_patch=$(( last_patch + 1 ))
+            else
+              next_patch="${last_patch}"
+            fi
+            base_version="${major_minor_version}.${next_patch}"
           else
-            release_candidate=0
+            # non-release branch: find greatest tag and increment minor
+            last_tag=$(git tag --list | sort -V | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | tail -1 || true)
+
+            if [[ -z "${last_tag}" ]]; then
+              base_version="0.1.0"
+            else
+              major=$(echo "${last_tag}" | cut -d. -f1)
+              minor=$(echo "${last_tag}" | cut -d. -f2)
+              base_version="${major}.$(( minor + 1 )).0"
+            fi
           fi
 
-          echo "Will use release candidate 'rc.${release_candidate}'"
-          echo "release-candidate=${release_candidate}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_NAME" == "master" || "$GITHUB_REF_NAME" =~ ^release- ]]; then
+            prerelease="$(date +%s)"
+          else
+            prerelease="0"
+          fi
+
+          version="${base_version}-${prerelease}"
+
+          echo "Determined version: ${version} (last tag: ${last_tag:-none})"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   build-and-publish-artifacts:
     name: Build and publish OCI artifacts
