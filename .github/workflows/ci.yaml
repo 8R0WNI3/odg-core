@@ -69,7 +69,7 @@ jobs:
     name: Build and publish OCI artifacts
     needs:
       - preprocess
-    uses: ./.github/workflows/build-and-publish-artifacts.yaml
+    uses: ./.github/workflows/build.yaml
     permissions:
       contents: read
       packages: write
