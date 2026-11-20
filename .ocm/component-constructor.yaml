@@ -1,66 +1,67 @@
-components:
-  - name: ocm.software/open-delivery-gear/core
+name: ocm.software/open-delivery-gear/core
+version: "${VERSION}"
+componentReferences:
+  - version: 1.0.0
+provider:
+  name: ocm.software
+resources:
+  - name: core
+    type: ociImage
     version: "${VERSION}"
-    provider:
-      name: ocm.software
-    resources:
-      - name: core
-        type: ociImage
-        version: "${VERSION}"
-        relation: local
-        access:
-          type: OCIImage/v1
-          imageReference: "${CORE_IMAGE_REF}"
-        labels:
-          - name: security.ocm.software/risk-profile
-            value:
-              network_exposure: public
-              authentication_enforced: true
-              user_interaction: end-user
-              confidentiality_requirement: high
-              integrity_requirement: high
-              availability_requirement: high
-      - name: bootstrapping
-        type: helmChart
-        version: "${VERSION}"
-        relation: local
-        access:
-          type: OCIImage/v1
-          imageReference: "${BOOTSTRAPPING_CHART_REF}"
-      - name: delivery-service
-        type: helmChart
-        version: "${VERSION}"
-        relation: local
-        access:
-          type: OCIImage/v1
-          imageReference: "${DELIVERY_SERVICE_CHART_REF}"
-      - name: extensions
-        type: helmChart
-        version: "${VERSION}"
-        relation: local
-        access:
-          type: OCIImage/v1
-          imageReference: "${EXTENSIONS_CHART_REF}"
-      - name: postgresql
-        type: ociImage
-        version: 16.8.0
-        relation: external
-        access:
-          type: OCIImage/v1
-          imageReference: europe-docker.pkg.dev/gardener-project/releases/ocm-gear/postgres:16.8.0
-        labels:
-          - name: security.ocm.software/risk-profile
-            value:
-              authentication_enforced: true
-              availability_requirement: high
-              confidentiality_requirement: high
-              integrity_requirement: high
-              network_exposure: protected
-              user_interaction: operator
-      - name: postgresql
-        type: helmChart
-        version: 16.6.1
-        relation: external
-        access:
-          type: OCIImage/v1
-          imageReference: europe-docker.pkg.dev/gardener-project/releases/charts/ocm-gear/postgresql:16.6.1
+    relation: local
+    access:
+      type: OCIImage/v1
+      imageReference: "${CORE_IMAGE_REF}"
+    labels:
+      - name: security.ocm.software/risk-profile
+        value:
+          network_exposure: public
+          authentication_enforced: true
+          user_interaction: end-user
+          confidentiality_requirement: high
+          integrity_requirement: high
+          availability_requirement: high
+  - name: bootstrapping
+    type: helmChart
+    version: "${VERSION}"
+    relation: local
+    access:
+      type: OCIImage/v1
+      imageReference: "${BOOTSTRAPPING_CHART_REF}"
+  - name: delivery-service
+    type: helmChart
+    version: "${VERSION}"
+    relation: local
+    access:
+      type: OCIImage/v1
+      imageReference: "${DELIVERY_SERVICE_CHART_REF}"
+  - name: extensions
+    type: helmChart
+    version: "${VERSION}"
+    relation: local
+    access:
+      type: OCIImage/v1
+      imageReference: "${EXTENSIONS_CHART_REF}"
+  - name: postgresql
+    type: ociImage
+    version: 16.8.0
+    relation: external
+    access:
+      type: OCIImage/v1
+      imageReference: europe-docker.pkg.dev/gardener-project/releases/ocm-gear/postgres:16.8.0
+    labels:
+      - name: security.ocm.software/risk-profile
+        value:
+          authentication_enforced: true
+          availability_requirement: high
+          confidentiality_requirement: high
+          integrity_requirement: high
+          network_exposure: protected
+          user_interaction: operator
+  - name: postgresql
+    type: helmChart
+    version: 16.6.1
+    relation: external
+    access:
+      type: OCIImage/v1
+      imageReference: europe-docker.pkg.dev/gardener-project/releases/charts/ocm-gear/postgresql:16.6.1
