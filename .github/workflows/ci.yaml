@@ -20,6 +20,8 @@ jobs:
           fetch-tags: true
       - name: Determine version
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -43,13 +45,18 @@ jobs:
               base_version="${major_minor}.$(( patch + 1 ))"
             fi
           else
-            # master / other: greatest full-release tag across all, bump minor
-            last_tag=$(greatest_tag "*.*.*")
-            if [[ -z "${last_tag}" ]]; then
+            # master / other: greatest release-<major>.<minor> branch, bump minor
+            last_branch=$(gh api "/repos/${{ github.repository }}/branches" \
+              --paginate --jq '.[].name' \
+              | grep -E '^release-[0-9]+\.[0-9]+$' \
+              | sed 's/release-//' \
+              | sort -V \
+              | tail -1 || true)
+            if [[ -z "${last_branch}" ]]; then
               base_version="0.1.0"
             else
-              major=$(echo "${last_tag}" | cut -d. -f1)
-              minor=$(echo "${last_tag}" | cut -d. -f2)
+              major=$(echo "${last_branch}" | cut -d. -f1)
+              minor=$(echo "${last_branch}" | cut -d. -f2)
               base_version="${major}.$(( minor + 1 )).0"
             fi
           fi
@@ -62,7 +69,7 @@ jobs:
 
           version="${base_version}-${prerelease}"
 
-          echo "Determined version: ${version} (last tag: ${last_tag:-none})"
+          echo "Determined version: ${version} (last tag: ${last_tag:-none}, last branch: ${last_branch:-none})"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   build-and-publish-artifacts:
