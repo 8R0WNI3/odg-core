@@ -46,11 +46,12 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .ocm
-
+            extension-definitions.yaml
       - name: Install OCM CLI
         id: ocm
         uses: open-component-model/ocm-setup-action@585a852942b7fb3a1171c02eeb2d24e8deace9e6 # v2.0.0
-
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - name: Compute OCI refs
         env:
           VERSION: ${{ inputs.version }}
@@ -65,19 +66,17 @@ jobs:
           echo "OWNER=$OWNER" >> "$GITHUB_ENV"
 
           {
-            echo "CORE_IMAGE_REF=$REGISTRY/$OWNER/odg/images/core:${VERSION}@${CORE_IMAGE_DIGEST}"
-            echo "BOOTSTRAPPING_CHART_REF=$REGISTRY/$OWNER/odg/charts/bootstrapping:${VERSION}@${BOOTSTRAPPING_CHART_DIGEST}"
-            echo "DELIVERY_SERVICE_CHART_REF=$REGISTRY/$OWNER/odg/charts/delivery-service:${VERSION}@${DELIVERY_SERVICE_CHART_DIGEST}"
-            echo "EXTENSIONS_CHART_REF=$REGISTRY/$OWNER/odg/charts/extensions:${VERSION}@${EXTENSIONS_CHART_DIGEST}"
+            echo "CORE_IMAGE_REF=$REGISTRY/$OWNER/odg/images/core:$VERSION@$CORE_IMAGE_DIGEST"
+            echo "BOOTSTRAPPING_CHART_REF=$REGISTRY/$OWNER/odg/charts/bootstrapping:$VERSION@$BOOTSTRAPPING_CHART_DIGEST"
+            echo "DELIVERY_SERVICE_CHART_REF=$REGISTRY/$OWNER/odg/charts/delivery-service:$VERSION@$DELIVERY_SERVICE_CHART_DIGEST"
+            echo "EXTENSIONS_CHART_REF=$REGISTRY/$OWNER/odg/charts/extensions:$VERSION@$EXTENSIONS_CHART_DIGEST"
           } >> "$GITHUB_ENV"
-
       - name: Log in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Write OCM config
         run: |
           set -euo pipefail
@@ -92,10 +91,13 @@ jobs:
                     dockerConfigFile: $HOME/.docker/config.json
                     propagateConsumerIdentity: true
           EOF
-
-      - name: Publish component version
+      - name: Write version
         env:
           VERSION: ${{ inputs.version }}
+        run: |
+          echo "$VERSION" | uv run .ci/write-version
+      - name: Publish component version
+        env:
           CONSTRUCTOR: ${{ github.workspace }}/.ocm/component-constructor.yaml
         run: |
           set -euo pipefail
