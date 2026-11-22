@@ -46,11 +46,9 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .ocm
-
       - name: Install OCM CLI
         id: ocm
         uses: open-component-model/ocm-setup-action@585a852942b7fb3a1171c02eeb2d24e8deace9e6 # v2.0.0
-
       - name: Compute OCI refs
         env:
           VERSION: ${{ inputs.version }}
@@ -70,14 +68,12 @@ jobs:
             echo "DELIVERY_SERVICE_CHART_REF=$REGISTRY/$OWNER/odg/charts/delivery-service:${VERSION}@${DELIVERY_SERVICE_CHART_DIGEST}"
             echo "EXTENSIONS_CHART_REF=$REGISTRY/$OWNER/odg/charts/extensions:${VERSION}@${EXTENSIONS_CHART_DIGEST}"
           } >> "$GITHUB_ENV"
-
       - name: Log in to GHCR
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Write OCM config
         run: |
           set -euo pipefail
@@ -92,7 +88,6 @@ jobs:
                     dockerConfigFile: $HOME/.docker/config.json
                     propagateConsumerIdentity: true
           EOF
-
       - name: Publish component version
         env:
           VERSION: ${{ inputs.version }}
