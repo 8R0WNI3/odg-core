@@ -2,6 +2,12 @@ name: ocm.software/open-delivery-gear/core
 version: "${VERSION}"
 provider:
   name: ocm.software
+labels:
+  - name: odg.ocm.software/responsibles
+    value:
+      - github_hostname: github.com
+        teamname: open-component-model/odg-maintainers
+        type: githubTeam
 resources:
   - name: core
     type: ociImage
@@ -63,3 +69,39 @@ resources:
     access:
       type: OCIImage/v1
       imageReference: europe-docker.pkg.dev/gardener-project/releases/charts/ocm-gear/postgresql:16.6.1
+  - name: odg-extension-definitions
+    type: odg-extension
+    version: "${VERSION}"
+    relation: local
+    input:
+      type: Dir/v1
+      path: .
+      includeFiles: extension-definitions.yaml
+      compress: true
+  - name: extensions
+    type: helmchart-imagemap
+    version: "${VERSION}"
+    extraIdentity:
+      type: helmchart-imagemap
+    relation: local
+    input:
+      type: File/v1
+      path: helmchart-imagemaps/extensions.json
+  - name: delivery-service
+    type: helmchart-imagemap
+    version: "${VERSION}"
+    extraIdentity:
+      type: helmchart-imagemap
+    relation: local
+    input:
+      type: File/v1
+      path: helmchart-imagemaps/delivery-service.json
+  - name: postgresql
+    type: helmchart-imagemap
+    version: "${VERSION}"
+    extraIdentity:
+      type: helmchart-imagemap
+    relation: local
+    input:
+      type: File/v1
+      path: helmchart-imagemaps/postgresql.json

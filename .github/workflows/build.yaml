@@ -229,12 +229,16 @@ jobs:
         env:
           OWNER: ${{ github.repository_owner }}
           VERSION: ${{ inputs.version }}
+          CORE_IMAGE_DIGEST: ${{ needs.collect-image.outputs.core-image-digest }}
         run: |
           set -euo pipefail
 
           OWNER="${OWNER,,}"
+          IMAGE_REF="$REGISTRY/$OWNER/odg/images/core:${VERSION}@${CORE_IMAGE_DIGEST}"
 
-          # set image refs in values
+          if [[ "${{ matrix.chart.name }}" == "delivery-service" || "${{ matrix.chart.name }}" == "extensions" ]]; then
+            sed -i "s|ref: null|ref: ${IMAGE_REF}|" ${{ matrix.chart.dir }}/values.yaml
+          fi
 
           helm package ${{ matrix.chart.dir }} --version "${VERSION}" --app-version "${VERSION}"
 
