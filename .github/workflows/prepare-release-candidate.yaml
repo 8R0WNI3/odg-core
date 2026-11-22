@@ -7,6 +7,12 @@ on:
         required: false
         description: |
           Optional commit SHA to create the release branch from (defaults to HEAD)
+      version:
+        type: string
+        required: false
+        description: |
+          Optional <major>.<minor> version for the release branch (e.g. 0.1).
+          If not set, the version is determined from existing branches/tags.
 
 permissions: {}
 
@@ -33,10 +39,10 @@ jobs:
           fetch-tags: true
           token: ${{ steps.token.outputs.token }}
           persist-credentials: false
-      - name: Create release branch
-        shell: bash
+      - name: Determine version
+        id: version
+        if: ${{ inputs.version == '' }}
         env:
-          COMMIT_SHA: ${{ inputs.commit-sha }}
           GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
@@ -69,13 +75,22 @@ jobs:
             fi
           fi
 
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Create release branch
+        env:
+          COMMIT_SHA: ${{ inputs.commit-sha }}
+          VERSION: ${{ inputs.version || steps.version.outputs.version }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+
           target="${COMMIT_SHA:-${GITHUB_SHA}}"
 
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             /repos/${{ github.repository }}/git/refs \
-            -f "ref=refs/heads/release-${version}" \
+            -f "ref=refs/heads/release-${VERSION}" \
             -f "sha=${target}"
 
-          echo "Created branch release-${version} at ${target}"
+          echo "Created branch release-${VERSION} at ${target}"
